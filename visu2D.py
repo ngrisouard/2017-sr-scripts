@@ -74,8 +74,6 @@ del d2pkl
 
 # %% Compute additional quantities --------------------------------------- # %%
 
-omega = 2*np.pi/s.T_omega
-
 # --- Derivation operators
 Dz1 = FD.getFDMatrix(s.nnz, s.dz, 1, accur)
 Dz1 = Dz1.T
@@ -91,11 +89,8 @@ Dx3 = FD.getFDMatrix(s.nx, s.dx, 2*s.hdeg+1, accur)
 # A = np.exp(s.zxs/250.)
 # B = Dz1.T.dot(A)
 
-# --- This one
+# --- This one is ???
 kmat = np.tile(s.k, [1, s.nnz])
-
-# --- Time loop
-itearr = range(0, s.nites, sk_us*s.sk_it)
 
 if not os.path.exists('{0}figures'.format(root)) and print_o_n:
     os.mkdir('{0}figures'.format(root))
@@ -106,22 +101,43 @@ if s.RecType != 'append':
     raise NameError('Record type is not append')
 
 # fID = nc.MFDataset('{0}2D/XZ{1}*.nc'.format(root, s.iteID, s.npID), 'r')
-if s.np == 1:
-    fID = nc.Dataset('{0}2D/XZ.nc'.format(root), 'r')
-else:
-    raise NameError("More than one processor")
+fID = {}
+for pr in range(s.np):
+    prs = '{0:02d}'.format(pr)  # string version of pr, 2 digits
+
+    if s.np == 1:  # string version of pr, as suffix of file name
+        npstr = ''
+    else:
+        npstr = '_0' + prs
+
+    fID[prs] = nc.Dataset(setup + '/2D/XZ' + npstr + '.nc', 'r')
+
+t = fID['{0:02d}'.format(s.np)].variables['tVar'][:].copy()
 
 # %% Compute various stuff ----------------------------------------------- # %%
 
 AspRat = ARFac*(s.Lx/s.nx)/(s.Lz/s.nz)  # aspect ratio for plotting
 
 plt.ioff()
-vrbl = fID.variables[var][::sk_us, :, :].copy()
-if four_o_n:
-    TFvrbl = TF.obfft(s.x, vrbl, 2)
-    TFvrbl /= np.nanmax(abs(TFvrbl))
 
-for ii in range(vrbl.shape[0]):
+vrbl = np.zeros((s.nnz, s.nx))
+
+for ii in range(len(t[::sk_us])):
+
+    for pr in range(s.np):
+        prs = '{0:02d}'.format(pr)  # string version of pr, 2 digits
+
+        kbi = pr * s.nz//s.np  # bottom z index to be loaded
+        kti = (pr + 1) * s.nz//s.np  # top z index to be loaded
+        if pr == s.np-1:
+            kti += 1
+
+        vrbl[kbi:kti, :] = fID[prs].variables[var][ii, :, :].copy()
+
+    if four_o_n:
+        TFvrbl = TF.obfft(s.x, vrbl, 2)
+        TFvrbl /= np.nanmax(abs(TFvrbl))
+
     print('ii = ' + str(ii))
     # vrbl = fID.variables[var][ii, ::skz, ::skx].copy()
 
@@ -147,11 +163,13 @@ for ii in range(vrbl.shape[0]):
         ax2 = fig2.gca()
         pcax2 = ax2.pcolormesh(s.km, s.zx[:-1, :],
                                np.log10(abs(TFvrbl[ii, :-1, :])),
-                                            vmin = -16., vmax = 0.)
+                               vmin=-16., vmax=0.)
         plt.colorbar(pcax2)
         plt.show(2)
 
         get_current_fig_manager().window.raise_()
         plt.pause(0.1)
 
-fID.close()
+for pr in range(s.np):
+    prs = '{0:02d}'.format(pr)  # string version of pr, 2 digits
+    fID[prs].close()
